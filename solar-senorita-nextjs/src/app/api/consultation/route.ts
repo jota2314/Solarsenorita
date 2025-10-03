@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Prepare email content
-    const urgencyLabels = {
+    const urgencyLabels: Record<string, string> = {
       'asap': 'ASAP - Ready to move forward',
       '1-3months': 'Within 1-3 months',
       '3-6months': 'Within 3-6 months',
