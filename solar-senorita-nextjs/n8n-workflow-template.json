@@ -1,0 +1,214 @@
+{
+  "name": "Solar Consultation Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "consultation",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Consultation Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "consultation-booking"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "calendarId": "primary",
+        "start": "={{ $now.plus({days: 1}).toFormat('yyyy-MM-dd') }}T09:00:00-05:00",
+        "end": "={{ $now.plus({days: 7}).toFormat('yyyy-MM-dd') }}T17:00:00-05:00",
+        "options": {
+          "singleEvents": true,
+          "orderBy": "startTime"
+        }
+      },
+      "id": "google-calendar-check",
+      "name": "Check Available Times",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Find next available time slot\nconst events = $input.all()[0].json.items || [];\nconst now = new Date();\nconst businessHours = [\n  { start: 9, end: 17 }, // 9 AM to 5 PM\n];\n\n// Generate time slots for next 7 days\nconst availableSlots = [];\nfor (let day = 1; day <= 7; day++) {\n  const date = new Date(now);\n  date.setDate(date.getDate() + day);\n  \n  // Skip weekends\n  if (date.getDay() === 0 || date.getDay() === 6) continue;\n  \n  for (let hour = 9; hour < 17; hour++) {\n    const slotStart = new Date(date);\n    slotStart.setHours(hour, 0, 0, 0);\n    \n    const slotEnd = new Date(slotStart);\n    slotEnd.setHours(hour + 1, 0, 0, 0);\n    \n    // Check if slot conflicts with existing events\n    const hasConflict = events.some(event => {\n      const eventStart = new Date(event.start.dateTime || event.start.date);\n      const eventEnd = new Date(event.end.dateTime || event.end.date);\n      \n      return (slotStart < eventEnd && slotEnd > eventStart);\n    });\n    \n    if (!hasConflict) {\n      availableSlots.push({\n        start: slotStart.toISOString(),\n        end: slotEnd.toISOString(),\n        displayTime: slotStart.toLocaleString('en-US', {\n          weekday: 'long',\n          month: 'long', \n          day: 'numeric',\n          hour: 'numeric',\n          minute: '2-digit',\n          timeZone: 'America/New_York'\n        })\n      });\n    }\n  }\n}\n\n// Select first available slot\nconst selectedSlot = availableSlots[0];\n\nif (!selectedSlot) {\n  throw new Error('No available time slots found');\n}\n\nreturn {\n  customerData: $input.first().json,\n  selectedSlot,\n  availableSlots: availableSlots.slice(0, 3) // Return top 3 options\n};"
+      },
+      "id": "find-available-slot",
+      "name": "Find Available Slot",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "resource": "event",
+        "operation": "create",
+        "calendarId": "primary",
+        "start": "={{ $json.selectedSlot.start }}",
+        "end": "={{ $json.selectedSlot.end }}",
+        "summary": "Solar Consultation - {{ $json.customerData.phone }}",
+        "description": "Free solar consultation with Solar Señorita\\n\\nCustomer Details:\\nPhone: {{ $json.customerData.phone }}\\nEmail: {{ $json.customerData.email }}\\nSubmitted: {{ $json.customerData.submittedAt }}\\nSource: {{ $json.customerData.source }}",
+        "attendees": "{{ $json.customerData.email }}",
+        "options": {
+          "conferenceData": {
+            "createRequest": {
+              "requestId": "meet-{{ $randomString(10) }}",
+              "conferenceSolutionKey": {
+                "type": "hangoutsMeet"
+              }
+            }
+          },
+          "sendNotifications": true
+        }
+      },
+      "id": "create-calendar-event",
+      "name": "Create Calendar Event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract Google Meet link and format SMS message\nconst event = $input.first().json;\nconst customerData = $('Find Available Slot').first().json.customerData;\nconst selectedSlot = $('Find Available Slot').first().json.selectedSlot;\n\nconst meetLink = event.conferenceData?.entryPoints?.find(entry => entry.entryPointType === 'video')?.uri || 'Meeting link will be provided';\n\nconst smsMessage = `🌟 Solar Señorita Consultation Confirmed!\n\n📅 ${selectedSlot.displayTime}\n🎥 ${meetLink}\n\nHi! This is Jenni, your Solar Señorita. I'm excited to show you how solar can save you money!\n\nQuestions? Reply to this text or call (781) 426-6300\n\nSee you soon! ☀️`;\n\nreturn {\n  phone: customerData.phone,\n  email: customerData.email,\n  smsMessage,\n  meetLink,\n  appointmentTime: selectedSlot.displayTime,\n  calendarEventId: event.id,\n  calendarLink: event.htmlLink\n};"
+      },
+      "id": "format-sms-message",
+      "name": "Format SMS Message",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "from": "{{ $vars.TWILIO_PHONE_NUMBER }}",
+        "to": "{{ $json.phone }}",
+        "message": "{{ $json.smsMessage }}",
+        "options": {}
+      },
+      "id": "send-sms",
+      "name": "Send SMS Confirmation",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [1340, 240]
+    },
+    {
+      "parameters": {
+        "resource": "email",
+        "operation": "send",
+        "from": "TheSolarSenorita@gmail.com",
+        "to": "{{ $json.email }}",
+        "subject": "Your Solar Consultation is Confirmed! ☀️",
+        "message": "html",
+        "html": "<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .header { background: linear-gradient(45deg, #ff69b4, #00ff88); padding: 20px; text-align: center; color: white; }\n    .content { padding: 20px; }\n    .highlight { background: #f0f8ff; padding: 15px; border-left: 4px solid #ff69b4; margin: 15px 0; }\n    .button { display: inline-block; background: linear-gradient(45deg, #ff69b4, #00ff88); color: white; padding: 12px 24px; text-decoration: none; border-radius: 25px; margin: 10px 0; }\n  </style>\n</head>\n<body>\n  <div class=\"header\">\n    <h1>🌟 Your Solar Consultation is Confirmed!</h1>\n  </div>\n  <div class=\"content\">\n    <p>Hi there!</p>\n    \n    <p>This is Jenni, your Solar Señorita! I'm thrilled to help you discover how solar energy can reduce your electricity bills and increase your home's value.</p>\n    \n    <div class=\"highlight\">\n      <h3>📅 Appointment Details:</h3>\n      <p><strong>Date & Time:</strong> {{ $json.appointmentTime }}</p>\n      <p><strong>Duration:</strong> 30-45 minutes</p>\n      <p><strong>Meeting Type:</strong> Virtual consultation</p>\n    </div>\n    \n    <p><strong>Join the meeting:</strong></p>\n    <a href=\"{{ $json.meetLink }}\" class=\"button\">🎥 Join Google Meet</a>\n    \n    <h3>What to Expect:</h3>\n    <ul>\n      <li>✅ Personalized solar savings analysis</li>\n      <li>✅ Massachusetts solar incentive review</li>\n      <li>✅ Roof assessment and system sizing</li>\n      <li>✅ Financing options discussion</li>\n      <li>✅ Next steps if you decide to move forward</li>\n    </ul>\n    \n    <h3>Prepare for Your Consultation:</h3>\n    <ul>\n      <li>📄 Have a recent electricity bill handy</li>\n      <li>🏠 Know your approximate roof age and condition</li>\n      <li>💰 Think about your budget and financing preferences</li>\n      <li>❓ Write down any questions about solar energy</li>\n    </ul>\n    \n    <p><strong>Need to reschedule?</strong> Just reply to this email or call me at <a href=\"tel:+17814266300\">(781) 426-6300</a>.</p>\n    \n    <p>I can't wait to show you how solar can transform your energy bills!</p>\n    \n    <p>Sunny regards,<br/>\n    <strong>Jenni Martinez</strong><br/>\n    <em>Solar Señorita</em><br/>\n    📞 (781) 426-6300<br/>\n    📧 TheSolarSenorita@gmail.com</p>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "id": "send-email",
+      "name": "Send Email Confirmation",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 1,
+      "position": [1340, 360]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"success\": true,\n  \"message\": \"Consultation scheduled successfully\",\n  \"appointmentTime\": \"{{ $('Format SMS Message').first().json.appointmentTime }}\",\n  \"meetingLink\": \"{{ $('Format SMS Message').first().json.meetLink }}\",\n  \"calendarEventId\": \"{{ $('Format SMS Message').first().json.calendarEventId }}\"\n}",
+        "options": {}
+      },
+      "id": "webhook-response",
+      "name": "Send Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1560, 300]
+    }
+  ],
+  "connections": {
+    "Consultation Webhook": {
+      "main": [
+        [
+          {
+            "node": "Check Available Times",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Available Times": {
+      "main": [
+        [
+          {
+            "node": "Find Available Slot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Available Slot": {
+      "main": [
+        [
+          {
+            "node": "Create Calendar Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Calendar Event": {
+      "main": [
+        [
+          {
+            "node": "Format SMS Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format SMS Message": {
+      "main": [
+        [
+          {
+            "node": "Send SMS Confirmation",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Email Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send SMS Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "timezone": "America/New_York"
+  }
+}
