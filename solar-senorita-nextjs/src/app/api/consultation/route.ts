@@ -3,6 +3,13 @@ import twilio from 'twilio';
 
 export async function POST(request: NextRequest) {
   try {
+    // Debug: Check environment variables
+    console.log('ENV CHECK:', {
+      RESEND_API_KEY: process.env.RESEND_API_KEY ? 'SET' : 'MISSING',
+      FROM_EMAIL: process.env.FROM_EMAIL || 'MISSING',
+      CONTACT_EMAIL: process.env.CONTACT_EMAIL || 'MISSING'
+    });
+
     const body = await request.json();
     const { phone, email, projectType, address, urgency } = body;
 
