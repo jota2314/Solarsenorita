@@ -75,7 +75,7 @@ ${urgency === 'asap' ?
 
     // Try multiple email services for reliability
     let emailSent = false;
-    let lastError = null;
+    let lastError: any = null;
 
     // Option 1: Try Resend (if API key is available)
     if (process.env.RESEND_API_KEY && !emailSent) {
@@ -174,7 +174,7 @@ ${urgency === 'asap' ?
 
     // Try to send SMS
     let smsSent = false;
-    let smsError = null;
+    let smsError: any = null;
 
     if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER) {
       try {
